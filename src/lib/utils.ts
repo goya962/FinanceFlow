@@ -18,6 +18,8 @@ export function formatDate(date: string | Date) {
   return formatDateFns(dateObj, "PPP")
 }
 
+// This function is no longer needed as we are using UUIDs from crypto.randomUUID()
+/*
 export function generateNumericId<T extends { id: string }>(items: T[], prefix: string): string {
   const existingIds = items.map(item => {
     const match = item.id.match(new RegExp(`^${prefix}-(\\d+)$`));
@@ -26,3 +28,4 @@ export function generateNumericId<T extends { id: string }>(items: T[], prefix: 
   const maxId = Math.max(0, ...existingIds);
   return `${prefix}-${maxId + 1}`;
 }
+*/

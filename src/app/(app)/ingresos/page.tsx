@@ -17,8 +17,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import type { Income, IncomeSourceType } from "@/types";
 import { PlusCircle, Edit, Trash2, CalendarIcon } from "lucide-react";
 import { formatCurrency, formatDate, cn } from "@/lib/utils";
-import { format, getMonth, getYear, parseISO, isSameMonth, isSameYear } from 'date-fns';
+import { format, parseISO, startOfMonth, endOfMonth } from 'date-fns';
 import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import type { DateRange } from "react-day-picker";
 
 const incomeSchema = z.object({
   description: z.string().min(2, "La descripción es requerida."),
@@ -45,7 +47,7 @@ function IncomeForm({ income, onDone }: { income?: Income, onDone: () => void })
 
   const availableSources = useMemo(() => {
     return [
-        ...data.banks.flatMap(b => b.accounts.map(a => ({...a, name: `${b.name} - ${a.name}`}))), 
+        ...data.banks.flatMap(b => b.accounts.map(a => ({...a, id: a.id, name: `${b.name} - ${a.name}`}))), 
         ...data.wallets
     ];
   }, [data]);
@@ -54,6 +56,13 @@ function IncomeForm({ income, onDone }: { income?: Income, onDone: () => void })
     if (data.wallets.some(w => w.id === sourceId)) {
         return { type: 'wallet', id: sourceId };
     }
+     // Find the account across all banks
+    for (const bank of data.banks) {
+      if (bank.accounts.some(a => a.id === sourceId)) {
+        return { type: 'bank', id: sourceId };
+      }
+    }
+    // Fallback, though should not be reached if logic is correct
     return { type: 'bank', id: sourceId };
   }
 
@@ -86,22 +95,27 @@ function IncomeForm({ income, onDone }: { income?: Income, onDone: () => void })
 }
 
 export default function IngresosPage() {
-  const { data, deleteIncome } = useData();
+  const { data, deleteIncome, isLoading } = useData();
   const [isFormOpen, setFormOpen] = useState(false);
   const [editingIncome, setEditingIncome] = useState<Income | undefined>();
-  const [selectedDate, setSelectedDate] = useState(new Date());
-
-  const months = Array.from({ length: 12 }, (_, i) => new Date(0, i).toLocaleString('es-ES', { month: 'long' }));
-  const years = useMemo(() => {
-    if (data.incomes.length === 0) return [getYear(new Date())];
-    return [...new Set(data.incomes.map(e => getYear(parseISO(e.date))))].sort((a, b) => b - a);
-  }, [data.incomes]);
+  const [dateRange, setDateRange] = useState<DateRange | undefined>({
+    from: startOfMonth(new Date()),
+    to: endOfMonth(new Date()),
+  });
 
   const filteredIncomes = useMemo(() => {
+    if (isLoading || !data.incomes || !dateRange?.from) return [];
+    
+    const fromDate = dateRange.from;
+    const toDate = dateRange.to || dateRange.from; // If only from is selected, use it as to date
+
     return data.incomes
-      .filter(i => isSameMonth(parseISO(i.date), selectedDate) && isSameYear(parseISO(i.date), selectedDate))
+      .filter(i => {
+        const incomeDate = parseISO(i.date);
+        return incomeDate >= fromDate && incomeDate <= toDate;
+      })
       .sort((a,b) => parseISO(b.date).getTime() - parseISO(a.date).getTime());
-  }, [data.incomes, selectedDate]);
+  }, [data.incomes, dateRange, isLoading]);
   
   const openDialog = (income?: Income) => {
     setEditingIncome(income);
@@ -109,18 +123,57 @@ export default function IngresosPage() {
   };
   const closeDialog = () => setFormOpen(false);
 
+  const getSourceName = (source: {type: string, id: string}) => {
+    if (source.type === 'wallet') return data.wallets.find(w => w.id === source.id)?.name || 'Billetera';
+    if (source.type === 'bank') {
+        for (const bank of data.banks) {
+            const account = bank.accounts.find(a => a.id === source.id);
+            if (account) return `${bank.name} - ${account.name}`;
+        }
+    }
+    return 'Desconocido'
+  }
+
   return (
     <>
       <PageHeader title="Ingresos">
         <div className="flex gap-2">
-            <Select value={String(getMonth(selectedDate))} onValueChange={(val) => setSelectedDate(new Date(getYear(selectedDate), parseInt(val)))}>
-              <SelectTrigger className="w-[180px]"><SelectValue placeholder="Mes" /></SelectTrigger>
-              <SelectContent>{months.map((month, i) => <SelectItem key={month} value={String(i)}>{month}</SelectItem>)}</SelectContent>
-            </Select>
-            <Select value={String(getYear(selectedDate))} onValueChange={(val) => setSelectedDate(new Date(parseInt(val), getMonth(selectedDate)))}>
-              <SelectTrigger className="w-[120px]"><SelectValue placeholder="Año" /></SelectTrigger>
-              <SelectContent>{years.map(year => <SelectItem key={year} value={String(year)}>{year}</SelectItem>)}</SelectContent>
-            </Select>
+           <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  id="date"
+                  variant={"outline"}
+                  className={cn(
+                    "w-[300px] justify-start text-left font-normal",
+                    !dateRange && "text-muted-foreground"
+                  )}
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {dateRange?.from ? (
+                    dateRange.to ? (
+                      <>
+                        {format(dateRange.from, "LLL dd, y")} -{" "}
+                        {format(dateRange.to, "LLL dd, y")}
+                      </>
+                    ) : (
+                      format(dateRange.from, "LLL dd, y")
+                    )
+                  ) : (
+                    <span>Pick a date</span>
+                  )}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  initialFocus
+                  mode="range"
+                  defaultMonth={dateRange?.from}
+                  selected={dateRange}
+                  onSelect={setDateRange}
+                  numberOfMonths={2}
+                />
+              </PopoverContent>
+            </Popover>
           <Button onClick={() => openDialog()}><PlusCircle className="mr-2 h-4 w-4" /> Agregar Ingreso</Button>
         </div>
       </PageHeader>
@@ -137,19 +190,29 @@ export default function IngresosPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredIncomes.length > 0 ? filteredIncomes.map((income) => (
+              {isLoading ? (
+                Array.from({length: 5}).map((_, i) => (
+                    <TableRow key={i}>
+                        <TableCell><Skeleton className="h-5" /></TableCell>
+                        <TableCell><Skeleton className="h-5" /></TableCell>
+                        <TableCell><Skeleton className="h-5" /></TableCell>
+                        <TableCell><Skeleton className="h-5" /></TableCell>
+                        <TableCell><Skeleton className="h-5" /></TableCell>
+                    </TableRow>
+                ))
+              ) : filteredIncomes.length > 0 ? filteredIncomes.map((income) => (
                 <TableRow key={income.id}>
                   <TableCell className="font-medium">{income.description}</TableCell>
                   <TableCell>{formatDate(income.date)}</TableCell>
-                  <TableCell className="capitalize">{income.source.type}</TableCell>
-                  <TableCell className="text-right text-[hsl(var(--chart-1))]">{formatCurrency(income.amount)}</TableCell>
+                  <TableCell>{getSourceName(income.source)}</TableCell>
+                  <TableCell className="text-right text-primary">{formatCurrency(income.amount)}</TableCell>
                   <TableCell className="text-right">
                     <Button variant="ghost" size="icon" onClick={() => openDialog(income)}><Edit className="h-4 w-4" /></Button>
                     <Button variant="ghost" size="icon" className="text-destructive" onClick={() => deleteIncome(income.id)}><Trash2 className="h-4 w-4" /></Button>
                   </TableCell>
                 </TableRow>
               )) : (
-                <TableRow><TableCell colSpan={5} className="text-center">No hay ingresos para este mes.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={5} className="text-center">No hay ingresos para este período.</TableCell></TableRow>
               )}
             </TableBody>
           </Table>

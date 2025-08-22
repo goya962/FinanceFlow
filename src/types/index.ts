@@ -54,6 +54,7 @@ export interface Expense {
   };
   cardId?: string;
   installments?: number;
+  installmentGroupId?: string;
   isSaving: boolean;
 }
 
@@ -65,3 +66,5 @@ export interface Data {
   expenses: Expense[];
   savingsGoal: number;
 }
+
+    
